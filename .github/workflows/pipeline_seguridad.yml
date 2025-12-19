@@ -1,0 +1,42 @@
+name: Pipeline DevSecOps (Build, Test & SAST)
+
+# DISPARADOR: Se ejecuta cuando alguien hace push a la rama 'main'
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  integracion-continua:
+    name: Build y Analisis de Seguridad
+    runs-on: ubuntu-latest # Usamos una máquina Linux de GitHub
+
+    steps:
+    # 1. Bajar el código del repositorio
+    - name: Checkout del código
+      uses: actions/checkout@v4
+
+    # 2. Instalar Go (Versión del proyecto)
+    - name: Configurar Go 1.25.5
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.25.5'
+
+    # 3. REQUISITO: Análisis de Seguridad Estático (SAST)
+    # Usamos Gosec para buscar vulnerabilidades en el código
+    - name: Ejecutar Análisis de Seguridad (Gosec)
+      uses: securego/gosec@master
+      with:
+        # Escanear todo el proyecto (./...)
+        args: ./...
+
+    # 4. REQUISITO: Ejecución de Tests
+    # Si los tests fallan, el pipeline se detiene aquí
+    - name: Ejecutar Tests Unitarios
+      run: go test -v ./...
+
+    # 5. REQUISITO: Build Automático
+    # Si todo lo anterior está bien, creamos el ejecutable
+    - name: Construir Aplicación (Build)
+      run: go build -v -o mi-app-segura ./...
