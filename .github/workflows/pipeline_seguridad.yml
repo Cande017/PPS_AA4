@@ -72,8 +72,9 @@ jobs:
         port: ${{ secrets.SSH_PORT }}
         key: ${{ secrets.SSH_PASSWORD}}
         source: "build/pps_app"
-        target: "${{ secrets.TARGET_DIR }}/pps_app.new"
-
+        target: "/opt/app_cyber5"
+        strip_components: 1      
+        overwrite: true
     # 8. REQUISITO: Automatización, Backups y Health-Check
     # Aquí es donde se cumplen parámetros adicionales para que el despliegue sea profesional
     - name: Ejecucion Remota Backup Swap y Reinicio
