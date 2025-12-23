@@ -76,7 +76,7 @@ jobs:
 
     # 8. REQUISITO: Automatización, Backups y Health-Check
     # Aquí es donde se cumplen parámetros adicionales para que el despliegue sea profesional
-    - name: Ejecución Remota: Backup, Swap y Reinicio
+    - name: Ejecución Remota Backup, Swap y Reinicio
       uses: appleboy/ssh-action@v0.1.7
       with:
         host: ${{ secrets.SSH_HOST }}
