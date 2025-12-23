@@ -70,24 +70,22 @@ jobs:
         host: ${{ secrets.SSH_HOST }}
         username: ${{ secrets.SSH_USER }}
         port: ${{ secrets.SSH_PORT }}
-        key: ${{ secrets.SSH_PASSWORD}}
+        password: ${{ secrets.SSH_PASSWORD }}
         source: "build/pps_app"
         target: "/opt/app_cyber5"
-        strip_components: 1      
+        strip_components: 1
         overwrite: true
-    # 8. REQUISITO: Automatización, Backups y Health-Check
-    # Aquí es donde se cumplen parámetros adicionales para que el despliegue sea profesional
-    - name: Ejecucion Remota Backup Swap y Reinicio
+
+    - name: Ejecución remota y Reinicio
       uses: appleboy/ssh-action@v0.1.7
       with:
         host: ${{ secrets.SSH_HOST }}
         username: ${{ secrets.SSH_USER }}
         port: ${{ secrets.SSH_PORT }}
-        key: ${{ secrets.SSH_PASSWORD }}
+        password: ${{ secrets.SSH_PASSWORD }}
         script: |
-          set -e
-          cd "${{ secrets.TARGET_DIR }}"
-          ts=$(date +%s)
+          chmod +x /opt/app_cyber5/pps_app
+          sudo systemctl restart pps_app.service
 
           # Paso 1: Si ya hay una app corriendo, le hacemos un backup por si las moscas
           if [ -f pps_app ]; then
