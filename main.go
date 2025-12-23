@@ -48,7 +48,7 @@ func main() {
 		IdleTimeout:  15 * time.Second, // Tiempo máximo de espera entre peticiones
 	}
 
-	log.Println("Iniciando servidor SEGURO en el puerto 8080...")
+	log.Println("Verificando pipeline brrr....")
 
 	// 3. Arrancamos el servidor configurado
 	if err := server.ListenAndServe(); err != nil {
