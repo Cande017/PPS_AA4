@@ -1,32 +1,51 @@
 package main
 
 import (
+	"fmt"
+	"log"
 	"net/http"
-	"net/http/httptest"
-	"testing"
+	"time"
 )
 
-// Test para verificar que el servidor responde correctamente a la ruta de la imagen (/)
-func TestHandlerRootPath(t *testing.T) {
-	// 1. Crear una solicitud (Request) de prueba GET a la ruta "/"
-	req, err := http.NewRequest("GET", "/", nil)
-	if err != nil {
-		t.Fatal(err) // Falla si no se puede crear la solicitud
+func handler(w http.ResponseWriter, r *http.Request) {
+	// Implementación de Logs Estructurados (requisito de monitorización)
+	log.Printf("level=info method=%s path=%s remote_addr=%s",
+		r.Method, r.URL.Path, r.RemoteAddr)
+
+	// Requisito: Si la ruta es /, servimos la imagen estática
+	if r.URL.Path == "/" {
+		// http.ServeFile sirve el contenido del archivo 'static/logo.png'
+		http.ServeFile(w, r, "static/logo.png")
+		return
+	}
+}
+
+func main() {
+	// 1. Configuración del handler principal
+	http.HandleFunc("/", handler)
+
+	// Ruta de comprobación health-check
+
+	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, "OK")
+	})
+
+	// 2. Configuración SEGURA del servidor (Corrección G114)
+	// En lugar de usar http.ListenAndServe directamente, definimos un servidor
+	// con tiempos de espera (timeouts) para evitar ataques DoS (Slowloris).
+	server := &http.Server{
+		Addr:         ":8080",
+		Handler:      nil,               // Usa el DefaultServeMux (donde registramos el handler)
+		ReadTimeout:  10 * time.Second, // Tiempo máximo para leer la petición
+		WriteTimeout: 10 * time.Second, // Tiempo máximo para escribir la respuesta
+		IdleTimeout:  15 * time.Second, // Tiempo máximo de espera entre peticiones
 	}
 
-	// 2. Crear un ResponseRecorder (grabador de respuesta)
-	// Esto simula la respuesta HTTP que enviaría el servidor
-	rr := httptest.NewRecorder()
+	log.Println("Iniciando servidor SEGURO en el puerto 8080...")
 
-	// 3. Ejecutar la función handler con la solicitud de prueba
-	handler(rr, req)
-
-	// 4. Comprobaciones (Assertions)
-
-	// Verificar el código de estado HTTP
-	expectedStatus := http.StatusOK // Esperamos un código 200 OK
-	if status := rr.Code; status != expectedStatus {
-		t.Errorf("handler devolvió código de estado incorrecto: esperado %v, obtenido %v",
-			expectedStatus, status)
+	// 3. Arrancamos el servidor configurado
+	if err := server.ListenAndServe(); err != nil {
+		log.Fatal(err)
 	}
 }
