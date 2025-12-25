@@ -70,12 +70,11 @@ jobs:
         host: ${{ secrets.SSH_HOST }}
         username: ${{ secrets.SSH_USER }}
         port: ${{ secrets.SSH_PORT }}
-        password: ${{ secrets.SSH_PASSWORD }}
+        key: ${{ secrets.SSH_KEY }} 
         source: "build/pps_app"
         target: "/opt/app_cyber5"
         strip_components: 1
         overwrite: true
-        use_insecure_cipher: true # Ayuda a evitar fallos de handshake
 
     - name: Ejecución remota y Reinicio
       uses: appleboy/ssh-action@v1.0.3
@@ -83,8 +82,7 @@ jobs:
         host: ${{ secrets.SSH_HOST }}
         username: ${{ secrets.SSH_USER }}
         port: ${{ secrets.SSH_PORT }}
-        password: ${{ secrets.SSH_PASSWORD }}
-        script: |
+        key: ${{ secrets.SSH_KEY }} 
           chmod +x /opt/app_cyber5/pps_app
           sudo systemctl restart pps_app.service
 
