@@ -75,6 +75,7 @@ jobs:
         target: "/opt/app_cyber5"
         strip_components: 1
         overwrite: true
+        debug: true # Esto nos dará más pistas si falla
 
     - name: Ejecución remota y Reinicio
       uses: appleboy/ssh-action@v1.0.3
