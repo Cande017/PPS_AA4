@@ -70,7 +70,7 @@ jobs:
         host: ${{ secrets.SSH_HOST }}
         username: ${{ secrets.SSH_USER }}
         port: ${{ secrets.SSH_PORT }}
-        key: ${{ secrets.SSH_KEY }} 
+        key: ${{ secrets.SSH_KEY }}
         source: "build/pps_app"
         target: "/opt/app_cyber5"
         strip_components: 1
@@ -82,7 +82,8 @@ jobs:
         host: ${{ secrets.SSH_HOST }}
         username: ${{ secrets.SSH_USER }}
         port: ${{ secrets.SSH_PORT }}
-        key: ${{ secrets.SSH_KEY }} 
+        key: ${{ secrets.SSH_KEY }}
+        script: |
           chmod +x /opt/app_cyber5/pps_app
           sudo systemctl restart pps_app.service
 
