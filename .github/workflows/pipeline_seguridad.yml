@@ -65,7 +65,7 @@ jobs:
     # 7. REQUISITO: Enviar el archivo al servidor mediante el bastión
     # Usamos los secretos para no dejar ninguna IP o puerto a la vista
     - name: Copiar binario al servidor (SCP)
-      uses: appleboy/scp-action@v0.1.4
+      uses: appleboy/scp-action@v0.1.7
       with:
         host: ${{ secrets.SSH_HOST }}
         username: ${{ secrets.SSH_USER }}
@@ -75,9 +75,10 @@ jobs:
         target: "/opt/app_cyber5"
         strip_components: 1
         overwrite: true
+        use_insecure_cipher: true # Ayuda a evitar fallos de handshake
 
     - name: Ejecución remota y Reinicio
-      uses: appleboy/ssh-action@v0.1.7
+      uses: appleboy/ssh-action@v1.0.3
       with:
         host: ${{ secrets.SSH_HOST }}
         username: ${{ secrets.SSH_USER }}
@@ -87,6 +88,7 @@ jobs:
           chmod +x /opt/app_cyber5/pps_app
           sudo systemctl restart pps_app.service
 
+          
           # Paso 1: Si ya hay una app corriendo, le hacemos un backup por si las moscas
           if [ -f pps_app ]; then
             cp pps_app pps_app.bak.$ts
