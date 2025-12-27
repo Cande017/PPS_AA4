@@ -72,10 +72,9 @@ jobs:
         port: ${{ secrets.SSH_PORT }}
         key: ${{ secrets.SSH_KEY }}
         source: "build/pps_app"
-        target: "/opt/app_cyber5"
+        target: "/home/${{ secrets.SSH_USER }}"
         strip_components: 1
-        overwrite: true
-        debug: true # Esto nos dará más pistas si falla
+
 
     - name: Ejecución remota y Reinicio
       uses: appleboy/ssh-action@v1.0.3
@@ -85,36 +84,37 @@ jobs:
         port: ${{ secrets.SSH_PORT }}
         key: ${{ secrets.SSH_KEY }}
         script: |
-          chmod +x /opt/app_cyber5/pps_app
-          sudo systemctl restart pps_app.service
+          set -e
+          # Definir variables dentro del script
+          TARGET="/opt/app_cyber5"
+          TS=$(date +%s)
+          
+          # Ir a la carpeta de la app
+          cd $TARGET
 
           
           # Paso 1: Si ya hay una app corriendo, le hacemos un backup por si las moscas
           if [ -f pps_app ]; then
-            cp pps_app pps_app.bak.$ts
+            cp pps_app pps_app.bak.$TS
           fi
 
           # Paso 2: Ponemos el nuevo binario en su sitio y le damos permisos
-          mv pps_app.new pps_app
-          chmod +x pps_app
+          mv /home/${{ secrets.SSH_USER }}/pps_app $TARGET/pps_app
+          chmod +x $TARGET/pps_app
 
           # Paso 3: Reiniciamos el servicio para que cargue la nueva versión
-          sudo systemctl restart "${{ secrets.SERVICE_NAME }}"
+          sudo systemctl restart pps_app.service
 
           # Paso 4: TEST DE SALUD (Health Check)
           # Esperamos un poco y comprobamos si la app responde en el puerto
-          sleep 3
-          PORT=${{ secrets.APP_PORT }}
-          PORT=${PORT:-8080}
+          sleep 5
           
-          if curl -fS --max-time 5 http://127.0.0.1:${PORT}/health; then
-            echo "¡Despliegue exitoso y validado!"
+          
+          if curl -f http://127.0.0.1:8080/health; then
+            echo "SUCCESS: App estable."
           else
-            echo "¡ERROR! La app no responde. Iniciando Rollback automático..."
-            if [ -f pps_app.bak.$ts ]; then
-              mv pps_app.bak.$ts pps_app
-              sudo systemctl restart "${{ secrets.SERVICE_NAME }}"
-              echo "Rollback completado. El servidor vuelve a estar en la versión anterior."
-            fi
+            echo "FAIL: Haciendo rollback..."
+            mv pps_app.bak.$TS pps_app
+            sudo systemctl restart pps_app.service
             exit 1
           fi
