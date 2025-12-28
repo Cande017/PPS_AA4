@@ -6,26 +6,34 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
 )
 
-func esAtaque(path string) (bool, string) {
-	// Lista de patrones comunes usados por atacantes
-	patrones := map[string]string{
-		"../":         "Path Traversal (intento de acceder a carpetas del sistema)",
-		"/etc/passwd": "Intento de lectura de archivos críticos de Linux",
-		"SELECT":      "Posible Inyección SQL",
-		"UNION":       "Posible Inyección SQL",
-		"<script>":    "Intento de Cross-Site Scripting (XSS)",
-		"alert(":      "Intento de Cross-Site Scripting (XSS)",
-		".env":        "Intento de robo de credenciales",
+func esAtaque(rawURL string) (bool, string) {
+	// 1. Decodificamos la URL (convierte %27 en ', %20 en espacio, etc.)
+	decodedURL, err := url.PathUnescape(rawURL)
+	if err != nil {
+		decodedURL = rawURL // Si falla, usamos la original
 	}
 
-	pathUpper := strings.ToUpper(path)
+	pathUpper := strings.ToUpper(decodedURL)
+
+	patrones := map[string]string{
+		"../":         "Path Traversal",
+		"/ETC/PASSWD": "Lectura de archivos críticos",
+		"SELECT":      "Inyección SQL",
+		"UNION":       "Inyección SQL",
+		"OR '1'='1'":  "Inyección SQL (bypass)",
+		"OR 1=1":      "Inyección SQL (bypass)",
+		"<SCRIPT>":    "XSS",
+		".ENV":        "Robo de credenciales",
+	}
+
 	for patron, descripcion := range patrones {
-		if strings.Contains(pathUpper, strings.ToUpper(patron)) {
+		if strings.Contains(pathUpper, patron) {
 			return true, descripcion
 		}
 	}
@@ -55,44 +63,44 @@ func enviarAlertaDiscord(mensaje string) {
 }
 
 func handler(w http.ResponseWriter, r *http.Request) {
-	// 1. PRIMERO: Analizamos si la petición parece un ataque
-	// CAMBIO CLAVE: Usamos r.URL.String() para capturar TODA la URL,
-	// incluyendo los parámetros después del '?'
-	urlCompleta := r.URL.String()
+	// --- CAPA DE SEGURIDAD ---
+	urlParaAnalizar := r.URL.RequestURI() // RequestURI incluye path y query
+	detectado, motivo := esAtaque(urlParaAnalizar)
 
-	detectado, motivo := esAtaque(urlCompleta)
 	if detectado {
-		log.Printf("level=critical msg='ATAQUE DETECTADO' method=%s url=%s ip=%s motivo='%s'",
-			r.Method, urlCompleta, r.RemoteAddr, motivo)
-
-		enviarAlertaDiscord(fmt.Sprintf("⚠️ **INTENTO DE INTRUSIÓN**: \n- IP: %s\n- Motivo: %s\n- URL Completa: %s",
-			r.RemoteAddr, motivo, urlCompleta))
-
+		log.Printf("level=critical msg='ATAQUE' url=%s motivo=%s", urlParaAnalizar, motivo)
+		enviarAlertaDiscord(fmt.Sprintf("ATAQUE: %s en %s", motivo, urlParaAnalizar))
 		w.WriteHeader(http.StatusForbidden)
-		fmt.Fprint(w, "Acceso denegado: Actividad sospechosa detectada.")
-		return
-	}
-	// Endpoint de simulación de fallo (Evento Anómalo)
-	if r.URL.Path == "/simular-fallo" {
-		log.Printf("level=critical msg='Evento anómalo detectado' method=%s path=%s remote=%s", r.Method, r.URL.Path, r.RemoteAddr)
-		enviarAlertaDiscord("Acceso detectado al endpoint de fallo desde " + r.RemoteAddr)
-
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprint(w, "Error 500: Fallo detectado y alerta enviada.")
+		fmt.Fprint(w, "Acceso denegado.")
 		return
 	}
 
-	// Logs Estructurados para rutas normales
+	// --- RUTAS DE LA APLICACIÓN (Corregido) ---
+	// Usamos un switch o ifs claros para no pisar el 404
+
 	if r.URL.Path == "/" {
-		log.Printf("level=info method=%s path=%s", r.Method, r.URL.Path)
+		log.Printf("level=info path=/")
+		// Asegúrate de que la carpeta static/logo.png existe
 		http.ServeFile(w, r, "static/logo.png")
 		return
 	}
 
-	// 404
-	log.Printf("level=warning msg='Ruta no encontrada' path=%s", r.URL.Path)
-	http.NotFound(w, r)
+	if r.URL.Path == "/health" {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, "OK")
+		return
+	}
 
+	if r.URL.Path == "/simular-fallo" {
+		log.Printf("level=critical msg='Fallo manual'")
+		enviarAlertaDiscord("Simulación de fallo manual")
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	// Si no es ninguna de las anteriores, entonces sí es 404
+	log.Printf("level=warning msg='404' path=%s", r.URL.Path)
+	http.NotFound(w, r)
 }
 
 func main() {
