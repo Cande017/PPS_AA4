@@ -11,121 +11,106 @@ import (
 	"time"
 )
 
-// Función para enviar alertas a Discord usando variables de entorno
 func enviarAlertaDiscord(mensaje string) {
 	webhookURL := os.Getenv("DISCORD_WEBHOOK_URL")
 	if webhookURL == "" {
-		log.Println("level=warning msg='Webhook de Discord no configurado'")
 		return
 	}
-
-	payload := map[string]string{
-		"content": "🚨 **ALERTA DEVSECOPS**: " + mensaje,
-	}
+	payload := map[string]string{"content": "🚨 " + mensaje}
 	jsonPayload, _ := json.Marshal(payload)
-
-	// #nosec G107 - La URL proviene de una variable de entorno segura configurada en Secrets
+	// #nosec G107
 	resp, err := http.Post(webhookURL, "application/json", bytes.NewBuffer(jsonPayload))
-	if err != nil {
-		log.Printf("Error enviando alerta: %v", err)
-		return
+	if err == nil {
+		defer resp.Body.Close()
 	}
-	defer resp.Body.Close()
 }
 
-// Función para detectar patrones de ataque en la URL
-func esAtaque(path string) (bool, string) {
-	// Lista de patrones comunes usados por atacantes
+func esAtaque(r *http.Request) (bool, string) {
+	// Analizamos tanto el Path como la Query String (id=1'OR...)
+	analizar := strings.ToUpper(r.URL.RequestURI())
+
 	patrones := map[string]string{
-		"../":         "Path Traversal (intento de acceder a carpetas del sistema)",
-		"/etc/passwd": "Intento de lectura de archivos críticos de Linux",
-		"SELECT":      "Posible Inyección SQL",
-		"UNION":       "Posible Inyección SQL",
-		"<script>":    "Intento de Cross-Site Scripting (XSS)",
-		"alert(":      "Intento de Cross-Site Scripting (XSS)",
-		".env":        "Intento de robo de credenciales",
+		"../":         "Path Traversal",
+		"/ETC/PASSWD": "Archivo Crítico",
+		"SELECT":      "SQL Injection",
+		"UNION":       "SQL Injection",
+		"OR%20":       "SQL Injection",
+		"'":           "Caracter sospechoso",
+		"<SCRIPT>":    "XSS",
 	}
 
-	pathUpper := strings.ToUpper(path)
-	for patron, descripcion := range patrones {
-		if strings.Contains(pathUpper, strings.ToUpper(patron)) {
-			return true, descripcion
+	for patron, desc := range patrones {
+		if strings.Contains(analizar, patron) {
+			return true, desc
 		}
 	}
 	return false, ""
 }
 
-// ... (mantén tu función enviarAlertaDiscord igual que antes)
-
 func handler(w http.ResponseWriter, r *http.Request) {
-	// 1. PRIMERO: Analizamos si la petición parece un ataque
-	detectado, motivo := esAtaque(r.URL.Path)
-	if detectado {
-		log.Printf("level=critical msg='ATAQUE DETECTADO' method=%s path=%s ip=%s motivo='%s'",
-			r.Method, r.URL.Path, r.RemoteAddr, motivo)
+	// 1. Logs de cada petición
+	log.Printf("level=info method=%s path=%s remote=%s", r.Method, r.URL.Path, r.RemoteAddr)
 
-		enviarAlertaDiscord(fmt.Sprintf("⚠️ **INTENTO DE INTRUSIÓN**: \n- IP: %s\n- Motivo: %s\n- Ruta: %s",
-			r.RemoteAddr, motivo, r.URL.Path))
-
-		// Respondemos con un 403 Forbidden para bloquear el intento
-		w.WriteHeader(http.StatusForbidden)
-		fmt.Fprint(w, "Acceso denegado: Actividad sospechosa detectada.")
-		return
-	}
-
-	// 2. Lógica normal (Health, Simular-Fallo, Home)
-	if r.URL.Path == "/simular-fallo" {
-		log.Printf("level=critical msg='Evento anómalo manual' path=%s", r.URL.Path)
-		enviarAlertaDiscord("Simulación de fallo manual activada desde " + r.RemoteAddr)
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-
-	log.Printf("level=info method=%s path=%s remote_addr=%s", r.Method, r.URL.Path, r.RemoteAddr)
-
-	if r.URL.Path == "/" {
-		http.ServeFile(w, r, "static/logo.png")
-		return
-	}
-
-	// Health Check para el pipeline
+	// 2. Health Check (Prioritario para el pipeline)
 	if r.URL.Path == "/health" {
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprint(w, "OK")
 		return
 	}
 
+	// 3. CAPA DE SEGURIDAD (Evita falsos positivos en /)
+	if r.URL.Path != "/" && r.URL.Path != "/health" {
+		if detectado, motivo := esAtaque(r); detectado {
+			log.Printf("level=critical msg='ATAQUE' path=%s motivo=%s", r.URL.Path, motivo)
+			enviarAlertaDiscord(fmt.Sprintf("Intento de %s en %s", motivo, r.URL.RequestURI()))
+			w.WriteHeader(http.StatusForbidden)
+			fmt.Fprint(w, "Acceso denegado.")
+			return
+		}
+	}
+
+	// 4. Endpoint de fallo manual
+	if r.URL.Path == "/simular-fallo" {
+		log.Printf("level=critical msg='Fallo manual'")
+		enviarAlertaDiscord("Fallo manual detectado")
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	// 5. Ruta Principal (HOME) - Solo responde si es exactamente "/"
+	if r.URL.Path == "/" {
+		// Verificamos si existe el archivo antes para evitar el 404 de ServeFile
+		if _, err := os.Stat("static/logo.png"); err == nil {
+			http.ServeFile(w, r, "static/logo.png")
+		} else {
+			fmt.Fprint(w, "Bienvenido al servidor seguro (Imagen no encontrada)")
+		}
+		return
+	}
+
+	// 6. Si nada de lo anterior coincide
 	http.NotFound(w, r)
 }
 
 func main() {
-	// Configuración de logs en archivo con permisos seguros (G302 corregido)
-	f, err := os.OpenFile("app.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
-	if err == nil {
+	f, _ := os.OpenFile("app.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+	if f != nil {
 		log.SetOutput(f)
 		defer f.Close()
 	}
-	// 1. Configuración del handler
-	http.HandleFunc("/", handler)
-	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, "OK")
-	})
 
-	// 2. Configuración SEGURA del servidor (Corrección G114)
-	// En lugar de usar http.ListenAndServe directamente, definimos un servidor
-	// con tiempos de espera (timeouts) para evitar ataques DoS (Slowloris).
+	// Registramos solo el handler raíz
+	http.HandleFunc("/", handler)
+
 	server := &http.Server{
 		Addr:         ":8080",
-		Handler:      nil,              // Usa el DefaultServeMux (donde registramos el handler)
-		ReadTimeout:  10 * time.Second, // Tiempo máximo para leer la petición
-		WriteTimeout: 10 * time.Second, // Tiempo máximo para escribir la respuesta
-		IdleTimeout:  15 * time.Second, // Tiempo máximo de espera entre peticiones
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 10 * time.Second,
+		IdleTimeout:  15 * time.Second,
 	}
 
-	log.Println("Iniciando servidor por puerto 8080")
-
-	// Control de error al arrancar (G104 corregido)
+	log.Println("Servidor iniciado en 8080")
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Fatalf("Error crítico: %v", err)
+		log.Fatal(err)
 	}
 }
