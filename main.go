@@ -48,47 +48,48 @@ func esAtaque(r *http.Request) (bool, string) {
 }
 
 func handler(w http.ResponseWriter, r *http.Request) {
-	// 1. Logs de cada petición
+	// 1. Logs de cada petición (Para auditoría)
 	log.Printf("level=info method=%s path=%s remote=%s", r.Method, r.URL.Path, r.RemoteAddr)
 
-	// 2. Health Check (Prioritario para el pipeline)
+	// 2. Health Check (Exento de seguridad para evitar falsos positivos del pipeline)
 	if r.URL.Path == "/health" {
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprint(w, "OK")
 		return
 	}
 
-	// 3. CAPA DE SEGURIDAD (Evita falsos positivos en /)
-	if r.URL.Path != "/" && r.URL.Path != "/health" {
+	// 3. CAPA DE SEGURIDAD GLOBAL
+	// Analizamos todo lo que no sea la raíz "/"
+	if r.URL.Path != "/" {
 		if detectado, motivo := esAtaque(r); detectado {
-			log.Printf("level=critical msg='ATAQUE' path=%s motivo=%s", r.URL.Path, motivo)
-			enviarAlertaDiscord(fmt.Sprintf("Intento de %s en %s", motivo, r.URL.RequestURI()))
+			log.Printf("level=critical msg='ATAQUE DETECTADO' path=%s motivo=%s", r.URL.Path, motivo)
+			enviarAlertaDiscord(fmt.Sprintf("⚠️ **ATAQUE DETECTADO**: %s en la ruta %s", motivo, r.URL.RequestURI()))
+
 			w.WriteHeader(http.StatusForbidden)
-			fmt.Fprint(w, "Acceso denegado.")
+			fmt.Fprint(w, "Acceso denegado: Actividad sospechosa.")
 			return
 		}
 	}
 
-	// 4. Endpoint de fallo manual
-	if r.URL.Path == "/simular-fallo" {
-		log.Printf("level=critical msg='Fallo manual'")
-		enviarAlertaDiscord("Fallo manual detectado")
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-
-	// 5. Ruta Principal (HOME) - Solo responde si es exactamente "/"
+	// 4. Lógica de rutas normales
 	if r.URL.Path == "/" {
-		// Verificamos si existe el archivo antes para evitar el 404 de ServeFile
+		// Intentamos servir el logo
 		if _, err := os.Stat("static/logo.png"); err == nil {
 			http.ServeFile(w, r, "static/logo.png")
 		} else {
-			fmt.Fprint(w, "Bienvenido al servidor seguro (Imagen no encontrada)")
+			fmt.Fprint(w, "Servidor Seguro Activo")
 		}
 		return
 	}
 
-	// 6. Si nada de lo anterior coincide
+	if r.URL.Path == "/simular-fallo" {
+		log.Printf("level=critical msg='Fallo manual'")
+		enviarAlertaDiscord("Simulación de fallo manual activada")
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	// 5. Si no es nada de lo anterior, 404
 	http.NotFound(w, r)
 }
 
