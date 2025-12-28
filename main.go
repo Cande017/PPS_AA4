@@ -44,9 +44,8 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Logs Estructurados para rutas normales
-	log.Printf("level=info method=%s path=%s remote_addr=%s", r.Method, r.URL.Path, r.RemoteAddr)
-
 	if r.URL.Path == "/" {
+		log.Printf("level=info method=%s path=%s", r.Method, r.URL.Path)
 		http.ServeFile(w, r, "static/logo.png")
 		return
 	}
@@ -54,6 +53,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	// 404
 	log.Printf("level=warning msg='Ruta no encontrada' path=%s", r.URL.Path)
 	http.NotFound(w, r)
+
 }
 
 func main() {
