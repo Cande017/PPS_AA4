@@ -41,7 +41,7 @@ jobs:
     - name: Construir Aplicación (Build)
       run: |
         mkdir -p build
-        GOOS=linux GOARCH=amd64 go build -ldflags "-s -w" -v -o build/pps_app ./...
+        CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags "-s -w" -v -o build/pps_app ./...
 
     # 6. Guardar el binario para que el siguiente Job lo pueda usar
     - name: Subir Artefacto
@@ -65,55 +65,56 @@ jobs:
     # 7. REQUISITO: Enviar el archivo al servidor mediante el bastión
     # Usamos los secretos para no dejar ninguna IP o puerto a la vista
     - name: Copiar binario al servidor (SCP)
-      uses: appleboy/scp-action@v0.1.4
+      uses: appleboy/scp-action@v0.1.7
       with:
         host: ${{ secrets.SSH_HOST }}
         username: ${{ secrets.SSH_USER }}
         port: ${{ secrets.SSH_PORT }}
-        key: ${{ secrets.SSH_PASSWORD}}
+        key: ${{ secrets.SSH_KEY }}
         source: "build/pps_app"
-        target: "${{ secrets.TARGET_DIR }}/pps_app.new"
+        target: "/home/${{ secrets.SSH_USER }}"
+        strip_components: 1
 
-    # 8. REQUISITO: Automatización, Backups y Health-Check
-    # Aquí es donde se cumplen parámetros adicionales para que el despliegue sea profesional
-    - name: Ejecucion Remota Backup Swap y Reinicio
-      uses: appleboy/ssh-action@v0.1.7
+
+    - name: Ejecución remota y Reinicio
+      uses: appleboy/ssh-action@v1.0.3
       with:
         host: ${{ secrets.SSH_HOST }}
         username: ${{ secrets.SSH_USER }}
         port: ${{ secrets.SSH_PORT }}
-        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        key: ${{ secrets.SSH_KEY }}
         script: |
           set -e
-          cd "${{ secrets.TARGET_DIR }}"
-          ts=$(date +%s)
+          # Definir variables dentro del script
+          TARGET="/opt/app_cyber5"
+          TS=$(date +%s)
+          
+          # Ir a la carpeta de la app
+          cd $TARGET
+
 
           # Paso 1: Si ya hay una app corriendo, le hacemos un backup por si las moscas
           if [ -f pps_app ]; then
-            cp pps_app pps_app.bak.$ts
+            cp pps_app pps_app.bak.$TS
           fi
 
           # Paso 2: Ponemos el nuevo binario en su sitio y le damos permisos
-          mv pps_app.new pps_app
-          chmod +x pps_app
+          mv /home/${{ secrets.SSH_USER }}/pps_app $TARGET/pps_app
+          chmod +x $TARGET/pps_app
 
           # Paso 3: Reiniciamos el servicio para que cargue la nueva versión
-          sudo systemctl restart "${{ secrets.SERVICE_NAME }}"
+          sudo systemctl restart pps_app.service
 
           # Paso 4: TEST DE SALUD (Health Check)
           # Esperamos un poco y comprobamos si la app responde en el puerto
-          sleep 3
-          PORT=${{ secrets.APP_PORT }}
-          PORT=${PORT:-8080}
+          sleep 5
           
-          if curl -fS --max-time 5 http://127.0.0.1:${PORT}/health; then
-            echo "¡Despliegue exitoso y validado!"
+          
+          if curl -f http://127.0.0.1:8080/health; then
+            echo "SUCCESS: App estable."
           else
-            echo "¡ERROR! La app no responde. Iniciando Rollback automático..."
-            if [ -f pps_app.bak.$ts ]; then
-              mv pps_app.bak.$ts pps_app
-              sudo systemctl restart "${{ secrets.SERVICE_NAME }}"
-              echo "Rollback completado. El servidor vuelve a estar en la versión anterior."
-            fi
+            echo "FAIL: Haciendo rollback..."
+            mv pps_app.bak.$TS pps_app
+            sudo systemctl restart pps_app.service
             exit 1
           fi
