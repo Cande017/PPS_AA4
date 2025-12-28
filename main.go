@@ -6,39 +6,10 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"net/url"
 	"os"
 	"strings"
 	"time"
 )
-
-func esAtaque(rawURL string) (bool, string) {
-	// 1. Decodificamos la URL (convierte %27 en ', %20 en espacio, etc.)
-	decodedURL, err := url.PathUnescape(rawURL)
-	if err != nil {
-		decodedURL = rawURL // Si falla, usamos la original
-	}
-
-	pathUpper := strings.ToUpper(decodedURL)
-
-	patrones := map[string]string{
-		"../":         "Path Traversal",
-		"/ETC/PASSWD": "Lectura de archivos críticos",
-		"SELECT":      "Inyección SQL",
-		"UNION":       "Inyección SQL",
-		"OR '1'='1'":  "Inyección SQL (bypass)",
-		"OR 1=1":      "Inyección SQL (bypass)",
-		"<SCRIPT>":    "XSS",
-		".ENV":        "Robo de credenciales",
-	}
-
-	for patron, descripcion := range patrones {
-		if strings.Contains(pathUpper, patron) {
-			return true, descripcion
-		}
-	}
-	return false, ""
-}
 
 // Función para enviar alertas a Discord usando variables de entorno
 func enviarAlertaDiscord(mensaje string) {
@@ -62,44 +33,68 @@ func enviarAlertaDiscord(mensaje string) {
 	defer resp.Body.Close()
 }
 
-func handler(w http.ResponseWriter, r *http.Request) {
-	// --- CAPA DE SEGURIDAD ---
-	urlParaAnalizar := r.URL.RequestURI() // RequestURI incluye path y query
-	detectado, motivo := esAtaque(urlParaAnalizar)
+// Función para detectar patrones de ataque en la URL
+func esAtaque(path string) (bool, string) {
+	// Lista de patrones comunes usados por atacantes
+	patrones := map[string]string{
+		"../":         "Path Traversal (intento de acceder a carpetas del sistema)",
+		"/etc/passwd": "Intento de lectura de archivos críticos de Linux",
+		"SELECT":      "Posible Inyección SQL",
+		"UNION":       "Posible Inyección SQL",
+		"<script>":    "Intento de Cross-Site Scripting (XSS)",
+		"alert(":      "Intento de Cross-Site Scripting (XSS)",
+		".env":        "Intento de robo de credenciales",
+	}
 
+	pathUpper := strings.ToUpper(path)
+	for patron, descripcion := range patrones {
+		if strings.Contains(pathUpper, strings.ToUpper(patron)) {
+			return true, descripcion
+		}
+	}
+	return false, ""
+}
+
+// ... (mantén tu función enviarAlertaDiscord igual que antes)
+
+func handler(w http.ResponseWriter, r *http.Request) {
+	// 1. PRIMERO: Analizamos si la petición parece un ataque
+	detectado, motivo := esAtaque(r.URL.Path)
 	if detectado {
-		log.Printf("level=critical msg='ATAQUE' url=%s motivo=%s", urlParaAnalizar, motivo)
-		enviarAlertaDiscord(fmt.Sprintf("ATAQUE: %s en %s", motivo, urlParaAnalizar))
+		log.Printf("level=critical msg='ATAQUE DETECTADO' method=%s path=%s ip=%s motivo='%s'",
+			r.Method, r.URL.Path, r.RemoteAddr, motivo)
+
+		enviarAlertaDiscord(fmt.Sprintf("⚠️ **INTENTO DE INTRUSIÓN**: \n- IP: %s\n- Motivo: %s\n- Ruta: %s",
+			r.RemoteAddr, motivo, r.URL.Path))
+
+		// Respondemos con un 403 Forbidden para bloquear el intento
 		w.WriteHeader(http.StatusForbidden)
-		fmt.Fprint(w, "Acceso denegado.")
+		fmt.Fprint(w, "Acceso denegado: Actividad sospechosa detectada.")
 		return
 	}
 
-	// --- RUTAS DE LA APLICACIÓN (Corregido) ---
-	// Usamos un switch o ifs claros para no pisar el 404
+	// 2. Lógica normal (Health, Simular-Fallo, Home)
+	if r.URL.Path == "/simular-fallo" {
+		log.Printf("level=critical msg='Evento anómalo manual' path=%s", r.URL.Path)
+		enviarAlertaDiscord("Simulación de fallo manual activada desde " + r.RemoteAddr)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("level=info method=%s path=%s remote_addr=%s", r.Method, r.URL.Path, r.RemoteAddr)
 
 	if r.URL.Path == "/" {
-		log.Printf("level=info path=/")
-		// Asegúrate de que la carpeta static/logo.png existe
 		http.ServeFile(w, r, "static/logo.png")
 		return
 	}
 
+	// Health Check para el pipeline
 	if r.URL.Path == "/health" {
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprint(w, "OK")
 		return
 	}
 
-	if r.URL.Path == "/simular-fallo" {
-		log.Printf("level=critical msg='Fallo manual'")
-		enviarAlertaDiscord("Simulación de fallo manual")
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-
-	// Si no es ninguna de las anteriores, entonces sí es 404
-	log.Printf("level=warning msg='404' path=%s", r.URL.Path)
 	http.NotFound(w, r)
 }
 
