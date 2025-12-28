@@ -83,9 +83,6 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Log estándar de auditoría
-	log.Printf("level=info method=%s path=%s remote=%s", r.Method, r.URL.Path, r.RemoteAddr)
-
 	// --- 2. RUTAS PRIORITARIAS ---
 	if r.URL.Path == "/health" {
 		w.WriteHeader(http.StatusOK)
