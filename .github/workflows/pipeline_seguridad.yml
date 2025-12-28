@@ -100,9 +100,10 @@ jobs:
 
           # 2. ÚNICA ADICIÓN: Inyectar el Secret en el servicio de Linux
           # Esto borra si existía antes y añade la URL actual de los Secrets de GitHub
-          sed -i "/Environment=DISCORD_WEBHOOK_URL=/d" /etc/systemd/system/pps_app.service || true
-          sed -i "/\[Service\]/a Environment=DISCORD_WEBHOOK_URL=${{ secrets.DISCORD_WEBHOOK_URL }}" /etc/systemd/system/pps_app.service
-          systemctl daemon-reload
+          # Usamos sudo -n para evitar que pida terminal/interacción
+          sudo -n sed -i "/Environment=DISCORD_WEBHOOK_URL=/d" /etc/systemd/system/pps_app.service || true
+          sudo -n sed -i "/\[Service\]/a Environment=DISCORD_WEBHOOK_URL=${{ secrets.DISCORD_WEBHOOK_URL }}" /etc/systemd/system/pps_app.service
+          sudo -n systemctl daemon-reload
 
           # Paso 2: Ponemos el nuevo binario en su sitio y le damos permisos
           mv /home/${{ secrets.SSH_USER }}/pps_app $TARGET/pps_app
