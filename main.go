@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -97,8 +98,11 @@ func handler(w http.ResponseWriter, r *http.Request) {
 
 	// --- 2. DETECCIÓN DE FUERZA BRUTA (Aquí cae todo lo que no existe) ---
 
-	// Extraemos la IP (quitando el puerto)
-	ip := strings.Split(r.RemoteAddr, ":")[0]
+	// Forma robusta de sacar la IP sin el puerto
+	ip, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		ip = r.RemoteAddr // Si falla (raro), usamos el original
+	}
 
 	intentos404[ip]++
 
