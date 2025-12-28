@@ -8,15 +8,26 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 )
 
 var (
-	intentos404 = make(map[string]int)
-	// Definimos el límite: 5 errores 404 y saltará la alerta
-	limiteBloqueo = 5
+	intentos404     = make(map[string]int)
+	limiteBloqueo   = 5
+	peticionesPorIP = make(map[string]int)
+	limiteDoS       = 20
 )
+
+// Limpiador periódico para que el contador de DoS no sea acumulativo eterno
+func limpiarContadores() {
+	for {
+		time.Sleep(10 * time.Second)
+		peticionesPorIP = make(map[string]int)
+	}
+}
 
 func enviarAlertaDiscord(mensaje string) {
 	webhookURL := os.Getenv("DISCORD_WEBHOOK_URL")
@@ -33,9 +44,7 @@ func enviarAlertaDiscord(mensaje string) {
 }
 
 func esAtaque(r *http.Request) (bool, string) {
-	// Analizamos tanto el Path como la Query String (id=1'OR...)
 	analizar := strings.ToUpper(r.URL.RequestURI())
-
 	patrones := map[string]string{
 		"../":         "Path Traversal",
 		"/ETC/PASSWD": "Archivo Crítico",
@@ -44,6 +53,7 @@ func esAtaque(r *http.Request) (bool, string) {
 		"OR%20":       "SQL Injection",
 		"'":           "Caracter sospechoso",
 		"<SCRIPT>":    "XSS",
+		".ENV":        "Robo de credenciales",
 	}
 
 	for patron, desc := range patrones {
@@ -55,32 +65,45 @@ func esAtaque(r *http.Request) (bool, string) {
 }
 
 func handler(w http.ResponseWriter, r *http.Request) {
-	// 1. Logs de cada petición (Para auditoría)
+	// Extraer IP de forma robusta
+	ip, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		ip = r.RemoteAddr
+	}
+
+	// --- 1. DETECCIÓN DE DoS ---
+	peticionesPorIP[ip]++
+	if peticionesPorIP[ip] > limiteDoS {
+		log.Printf("level=critical msg='POSIBLE DoS DETECTADO' ip=%s peticiones=%d", ip, peticionesPorIP[ip])
+		enviarAlertaDiscord(fmt.Sprintf("🔥 **ALERTA DoS**: La IP %s ha superado el límite de %d peticiones en 10s.", ip, limiteDoS))
+		w.WriteHeader(http.StatusTooManyRequests)
+		fmt.Fprint(w, "Demasiadas peticiones. Bloqueado por seguridad.")
+		return
+	}
+
+	// Log estándar de auditoría
 	log.Printf("level=info method=%s path=%s remote=%s", r.Method, r.URL.Path, r.RemoteAddr)
 
-	// 2. Health Check (Exento de seguridad para evitar falsos positivos del pipeline)
+	// --- 2. RUTAS PRIORITARIAS ---
 	if r.URL.Path == "/health" {
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprint(w, "OK")
 		return
 	}
 
-	// 3. CAPA DE SEGURIDAD GLOBAL
-	// Analizamos todo lo que no sea la raíz "/"
+	// --- 3. CAPA DE SEGURIDAD (Patrones Maliciosos) ---
 	if r.URL.Path != "/" {
 		if detectado, motivo := esAtaque(r); detectado {
-			log.Printf("level=critical msg='ATAQUE DETECTADO' path=%s motivo=%s", r.URL.Path, motivo)
-			enviarAlertaDiscord(fmt.Sprintf("⚠️ **ATAQUE DETECTADO**: %s en la ruta %s", motivo, r.URL.RequestURI()))
-
+			log.Printf("level=critical msg='ATAQUE DETECTADO' path=%s motivo=%s ip=%s", r.URL.Path, motivo, ip)
+			enviarAlertaDiscord(fmt.Sprintf("⚠️ **ATAQUE DETECTADO**: %s de la IP %s en la ruta %s", motivo, ip, r.URL.RequestURI()))
 			w.WriteHeader(http.StatusForbidden)
 			fmt.Fprint(w, "Acceso denegado: Actividad sospechosa.")
 			return
 		}
 	}
 
-	// 4. Lógica de rutas normales
+	// --- 4. RUTAS VÁLIDAS ---
 	if r.URL.Path == "/" {
-		// Intentamos servir el logo
 		if _, err := os.Stat("static/logo.png"); err == nil {
 			http.ServeFile(w, r, "static/logo.png")
 		} else {
@@ -90,32 +113,19 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if r.URL.Path == "/simular-fallo" {
-		log.Printf("level=critical msg='Fallo manual'")
-		enviarAlertaDiscord("Simulación de fallo manual activada")
+		log.Printf("level=critical msg='Fallo manual' ip=%s", ip)
+		enviarAlertaDiscord("Simulación de fallo manual activada por " + ip)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
 
-	// --- 2. DETECCIÓN DE FUERZA BRUTA (Aquí cae todo lo que no existe) ---
-
-	// Forma robusta de sacar la IP sin el puerto
-	ip, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		ip = r.RemoteAddr // Si falla (raro), usamos el original
-	}
-
+	// --- 5. DETECCIÓN DE FUERZA BRUTA (404) ---
 	intentos404[ip]++
-
-	log.Printf("level=warning msg='404 detectado' ip=%s path=%s intentos=%d",
-		ip, r.URL.Path, intentos404[ip])
+	log.Printf("level=warning msg='404 detectado' ip=%s path=%s intentos=%d", ip, r.URL.Path, intentos404[ip])
 
 	if intentos404[ip] >= limiteBloqueo {
-		log.Printf("level=critical msg='POSIBLE ESCANEO DETECTADO' ip=%s", ip)
-
-		enviarAlertaDiscord(fmt.Sprintf("🛡️ **BLOQUEO POR FUERZA BRUTA**: \n- IP Atacante: %s\n- Acción: La IP ha generado %d errores 404 intentando adivinar rutas.",
-			ip, intentos404[ip]))
-
-		// Opcional: Resetear el contador después de avisar para no inundar Discord
+		log.Printf("level=critical msg='ESCANEO DETECTADO' ip=%s", ip)
+		enviarAlertaDiscord(fmt.Sprintf("🛡️ **BLOQUEO POR FUERZA BRUTA**: \n- IP Atacante: %s\n- Acción: %d errores 404 acumulados.", ip, intentos404[ip]))
 		intentos404[ip] = 0
 	}
 
@@ -129,7 +139,19 @@ func main() {
 		defer f.Close()
 	}
 
-	// Registramos solo el handler raíz
+	// Lanzar limpiador de DoS en segundo plano
+	go limpiarContadores()
+
+	// --- CAPTURA DE SEÑAL PARA ALERTA DE SERVICIO CAÍDO ---
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		sig := <-sigs
+		log.Printf("level=critical msg='SERVICIO DETENIDO' signal=%v", sig)
+		enviarAlertaDiscord("💀 **SERVICIO CAÍDO**: El servidor se ha detenido (Señal: " + sig.String() + ")")
+		os.Exit(0)
+	}()
+
 	http.HandleFunc("/", handler)
 
 	server := &http.Server{
