@@ -12,6 +12,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 var (
@@ -109,6 +111,11 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		} else {
 			fmt.Fprint(w, "Servidor Seguro Activo")
 		}
+		return
+	}
+
+	if r.URL.Path == "/metrics" {
+		promhttp.Handler().ServeHTTP(w, r)
 		return
 	}
 
