@@ -56,20 +56,22 @@ func enviarAlertaDiscord(mensaje string) {
 
 func handler(w http.ResponseWriter, r *http.Request) {
 	// 1. PRIMERO: Analizamos si la petición parece un ataque
-	detectado, motivo := esAtaque(r.URL.Path)
+	// CAMBIO CLAVE: Usamos r.URL.String() para capturar TODA la URL,
+	// incluyendo los parámetros después del '?'
+	urlCompleta := r.URL.String()
+
+	detectado, motivo := esAtaque(urlCompleta)
 	if detectado {
-		log.Printf("level=critical msg='ATAQUE DETECTADO' method=%s path=%s ip=%s motivo='%s'",
-			r.Method, r.URL.Path, r.RemoteAddr, motivo)
+		log.Printf("level=critical msg='ATAQUE DETECTADO' method=%s url=%s ip=%s motivo='%s'",
+			r.Method, urlCompleta, r.RemoteAddr, motivo)
 
-		enviarAlertaDiscord(fmt.Sprintf("⚠️ **INTENTO DE INTRUSIÓN**: \n- IP: %s\n- Motivo: %s\n- Ruta: %s",
-			r.RemoteAddr, motivo, r.URL.Path))
+		enviarAlertaDiscord(fmt.Sprintf("⚠️ **INTENTO DE INTRUSIÓN**: \n- IP: %s\n- Motivo: %s\n- URL Completa: %s",
+			r.RemoteAddr, motivo, urlCompleta))
 
-		// Respondemos con un 403 Forbidden para bloquear el intento
 		w.WriteHeader(http.StatusForbidden)
 		fmt.Fprint(w, "Acceso denegado: Actividad sospechosa detectada.")
 		return
 	}
-
 	// Endpoint de simulación de fallo (Evento Anómalo)
 	if r.URL.Path == "/simular-fallo" {
 		log.Printf("level=critical msg='Evento anómalo detectado' method=%s path=%s remote=%s", r.Method, r.URL.Path, r.RemoteAddr)
