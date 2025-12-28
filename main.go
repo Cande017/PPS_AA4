@@ -11,6 +11,12 @@ import (
 	"time"
 )
 
+var (
+	intentos404 = make(map[string]int)
+	// Definimos el límite: 5 errores 404 y saltará la alerta
+	limiteBloqueo = 5
+)
+
 func enviarAlertaDiscord(mensaje string) {
 	webhookURL := os.Getenv("DISCORD_WEBHOOK_URL")
 	if webhookURL == "" {
@@ -89,7 +95,26 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 5. Si no es nada de lo anterior, 404
+	// --- 2. DETECCIÓN DE FUERZA BRUTA (Aquí cae todo lo que no existe) ---
+
+	// Extraemos la IP (quitando el puerto)
+	ip := strings.Split(r.RemoteAddr, ":")[0]
+
+	intentos404[ip]++
+
+	log.Printf("level=warning msg='404 detectado' ip=%s path=%s intentos=%d",
+		ip, r.URL.Path, intentos404[ip])
+
+	if intentos404[ip] >= limiteBloqueo {
+		log.Printf("level=critical msg='POSIBLE ESCANEO DETECTADO' ip=%s", ip)
+
+		enviarAlertaDiscord(fmt.Sprintf("🛡️ **BLOQUEO POR FUERZA BRUTA**: \n- IP Atacante: %s\n- Acción: La IP ha generado %d errores 404 intentando adivinar rutas.",
+			ip, intentos404[ip]))
+
+		// Opcional: Resetear el contador después de avisar para no inundar Discord
+		intentos404[ip] = 0
+	}
+
 	http.NotFound(w, r)
 }
 
