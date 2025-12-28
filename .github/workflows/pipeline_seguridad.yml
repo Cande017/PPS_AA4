@@ -24,6 +24,10 @@ jobs:
       with:
         go-version: '1.25.5'
 
+    # NUEVO PASO: Descargar las librerías externas para que Gosec las vea
+    - name: Descargar dependencias
+      run: go mod download
+
     # 3. REQUISITO: Análisis de Seguridad Estático (SAST)
     # Usamos Gosec para buscar vulnerabilidades en el código
     - name: Ejecutar Análisis de Seguridad (Gosec)
