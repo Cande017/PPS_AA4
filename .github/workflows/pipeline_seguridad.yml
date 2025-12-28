@@ -41,7 +41,7 @@ jobs:
     - name: Construir Aplicación (Build)
       run: |
         mkdir -p build
-        GOOS=linux GOARCH=amd64 go build -ldflags "-s -w" -v -o build/pps_app ./...
+        CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags "-s -w" -v -o build/pps_app ./...
 
     # 6. Guardar el binario para que el siguiente Job lo pueda usar
     - name: Subir Artefacto
@@ -92,7 +92,7 @@ jobs:
           # Ir a la carpeta de la app
           cd $TARGET
 
-          
+
           # Paso 1: Si ya hay una app corriendo, le hacemos un backup por si las moscas
           if [ -f pps_app ]; then
             cp pps_app pps_app.bak.$TS
